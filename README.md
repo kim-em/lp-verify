@@ -1,0 +1,90 @@
+# LPVerify
+
+[![Lean](https://img.shields.io/badge/Lean-4.29.1-blue.svg)](./lean-toolchain)
+[![License](https://img.shields.io/github/license/kim-em/lp-verify.svg)](./LICENSE)
+
+Pure-Lean checker for linear programming certificates produced by
+SoPlex (or any solver that emits the [`kim-em/lp-core`](https://github.com/kim-em/lp-core)
+`Certificate` shape). No native dependencies — depending on
+`lp-verify` does **not** pull in the SoPlex C++ build.
+
+This is the package that delivers the standalone goal of
+[`kim-em/soplex#50`](https://github.com/kim-em/soplex/issues/50):
+*verify externally-produced certificates without building SoPlex*.
+Use it when you have an LP solution generated elsewhere (a CI
+artifact, a Python harness driving HiGHS via `lp-backend-soplex-json`,
+a remote service that produces SoPlex JSON output) and want a
+checked-in-Lean proof that the certificate is sound.
+
+If instead you want `by lp` end-to-end (the tactic that calls SoPlex
+itself and reconstructs Lean proof terms), depend on the meta-package
+[`kim-em/soplex`](https://github.com/kim-em/soplex). That pulls in
+`lp-verify` plus `lp-tactic` plus the SoPlex FFI backend.
+
+## Quickstart
+
+Add `LPVerify` to your `lakefile.lean`:
+
+```lean
+require LPVerify from git "https://github.com/kim-em/lp-verify" @ "main"
+```
+
+Construct (or deserialise) a `Problem` and a `Certificate`, then
+hand them to `verifyOutcome`:
+
+```lean
+import LPVerify
+open Soplex Soplex.Verify
+
+-- A trivially infeasible LP: 0 ≤ x ≤ -1.
+def lp : Problem 0 1 :=
+  { c         := #v[1]
+    a         := #[]
+    rowBounds := #v[]
+    colBounds := #v[(some 0, some (-1))] }
+
+-- … construct a Certificate via your favourite solver (or load
+-- from JSON), feed it to verifyOutcome, and pattern-match the
+-- Verified result.
+```
+
+`verifyOutcome` returns a `Verified` value whose constructors
+(`.optimal`, `.infeasible`, `.unbounded`, `.unchecked`) carry real
+Lean soundness proofs over the original `Problem`, not just a
+status label.
+
+## Trust model
+
+Pure Lean. The verifier itself adds no trust assumptions beyond
+the Lean kernel — every `Certificate` is independently checked
+before any proof is constructed, and certificates that fail
+checking are surfaced as `Verified.unchecked` rather than silently
+accepted.
+
+The serialisation layer between this checker and whichever external
+tool produced the certificate is the user's responsibility. If you
+want a known-good JSON wire format, see
+[`kim-em/lp-backend-soplex-json`](https://github.com/kim-em/lp-backend-soplex-json) (planned).
+
+## Layout
+
+```
+LPVerify.lean              # top-level import (aggregates submodules)
+LPVerify/Driver.lean       # `verifyOutcome`, the `Verified` inductive
+LPVerify/Sound.lean        # soundness lemmas for each Verified constructor
+LPVerify/Prop.lean         # Prop-level statement of validity
+LPVerify/Bool.lean         # decidable Bool-level checker
+LPVerify/Arith.lean        # rational arithmetic over Problem rows
+LPVerify/Budget.lean       # numerator/denominator bit-length budget
+```
+
+All declarations live in `namespace Soplex.Verify`, matching the
+namespace used before the split. A consumer that writes
+`Soplex.Verify.verifyOutcome` resolves the same way whether they
+imported `Soplex.Verify` (from `kim-em/soplex`) or `LPVerify`
+directly.
+
+## Licence
+
+`LPVerify` is licensed under the [Apache License 2.0](./LICENSE),
+matching the rest of the `kim-em/lean-soplex` family.
